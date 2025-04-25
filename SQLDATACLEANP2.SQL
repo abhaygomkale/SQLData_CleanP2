@@ -1,85 +1,77 @@
--- First, import your data into a table named 'layoffs'
--- Ensure your CSV is loaded in MySQL Workbench or use the import wizard
+-- STEP 1: Create a backup of the original layoffs table
+CREATE TABLE layoffs_backup LIKE layoffs;
+INSERT INTO layoffs_backup SELECT * FROM layoffs;
 
--- Creating a backup table to preserve original data
-CREATE TABLE lfc LIKE layoffs;
-INSERT INTO lfc SELECT * FROM layoffs;
+-- STEP 2: Identify duplicate rows using ROW_NUMBER()
+WITH duplicates AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY company, location, industry, total_laid_off,
+                            percentage_laid_off, date, stage, country, funds_raised_millions
+           ) AS row_num
+    FROM layoffs
+)
+SELECT * FROM duplicates WHERE row_num > 1;
 
--- Viewing the backup table
-SELECT * FROM lfc;
+-- STEP 3: Create a cleaned version of the table and add row_num column
+CREATE TABLE layoffs_cleaned LIKE layoffs_backup;
+ALTER TABLE layoffs_cleaned ADD COLUMN row_num INT;
 
--- Identifying duplicate rows using ROW_NUMBER()
-WITH DUPLI AS (
+-- STEP 4: Insert data into cleaned table with row numbers for duplicates
+INSERT INTO layoffs_cleaned
+WITH duplicates AS (
     SELECT *, 
            ROW_NUMBER() OVER (
                PARTITION BY company, location, industry, total_laid_off,
                             percentage_laid_off, date, stage, country, funds_raised_millions
-           ) AS RWN
+           ) AS row_num
     FROM layoffs
 )
-SELECT * FROM DUPLI WHERE RWN > 1;
+SELECT * FROM duplicates;
 
--- Creating a cleaned version of the backup table with an extra column for row number
-CREATE TABLE lfc2 LIKE lfc;
-ALTER TABLE lfc2 ADD COLUMN RW_n INT;
+-- STEP 5: Set proper datatype for percentage_laid_off
+ALTER TABLE layoffs_cleaned MODIFY COLUMN percentage_laid_off FLOAT;
 
--- Inserting data along with row number for identifying duplicates
-INSERT INTO lfc2
-WITH DUPLI AS (
-    SELECT *, 
-           ROW_NUMBER() OVER (
-               PARTITION BY company, location, industry, total_laid_off,
-                            percentage_laid_off, date, stage, country, funds_raised_millions
-           ) AS RWN
-    FROM layoffs
-)
-SELECT * FROM DUPLI;
+-- STEP 6: Remove duplicate rows (keep only row_num = 1)
+DELETE FROM layoffs_cleaned WHERE row_num > 1;
 
--- Ensuring the percentage_laid_off column has appropriate data type
-ALTER TABLE lfc2 MODIFY COLUMN percentage_laid_off FLOAT;
+-- STEP 7: Drop the helper column
+ALTER TABLE layoffs_cleaned DROP COLUMN row_num;
 
--- Deleting duplicate rows based on row number
-DELETE FROM lfc2 WHERE RW_n > 1;
+-- STEP 8: Check for missing or blank industry values in the original table
+SELECT * FROM layoffs WHERE industry IS NULL OR TRIM(industry) = '';
 
--- Dropping the helper column used for duplicate detection
-ALTER TABLE lfc2 DROP COLUMN RW_n;
+-- STEP 9: Add a new column for cleaned date format
+ALTER TABLE layoffs_cleaned ADD COLUMN clean_date DATE;
 
--- Checking rows where industry column is missing or blank
-SELECT * FROM layoffs WHERE industry IS NULL OR industry = '';
+-- STEP 10: Standardize inconsistent text values
+UPDATE layoffs_cleaned SET country = 'United States' WHERE country LIKE 'United State%';
+UPDATE layoffs_cleaned SET industry = 'Crypto' WHERE industry LIKE 'Crypto%';
 
--- Adding a new column for cleaned date format
-ALTER TABLE lfc2 ADD COLUMN CLEAN_DATE DATE;
+-- STEP 11: Convert string-based date column to DATE format
+UPDATE layoffs_cleaned SET clean_date = STR_TO_DATE(date, '%m/%d/%Y');
 
--- Standardizing country and industry values
-UPDATE lfc2 SET country = 'United States' WHERE country LIKE 'United State%';
-UPDATE lfc2 SET industry = 'Crypto' WHERE industry LIKE 'Crypto%';
+-- STEP 12: Replace original 'date' column with cleaned version
+ALTER TABLE layoffs_cleaned DROP COLUMN date;
+ALTER TABLE layoffs_cleaned RENAME COLUMN clean_date TO date;
 
--- Converting text-based date column to proper date format
-UPDATE lfc2 SET CLEAN_DATE = STR_TO_DATE(date, '%m/%d/%Y');
+-- STEP 13: Trim whitespace from string columns
+UPDATE layoffs_cleaned SET company = TRIM(company);
+UPDATE layoffs_cleaned SET location = TRIM(location);
+UPDATE layoffs_cleaned SET industry = TRIM(industry);
+UPDATE layoffs_cleaned SET country = TRIM(country);
 
--- Replacing original date column with the cleaned one
-ALTER TABLE lfc2 DROP COLUMN date;
-ALTER TABLE lfc2 RENAME COLUMN CLEAN_DATE TO date;
+-- STEP 14: Set empty strings in industry column to NULL
+UPDATE layoffs_cleaned SET industry = NULL WHERE industry = '';
 
--- Trimming unnecessary whitespace from text fields
-UPDATE lfc2 SET company = TRIM(company);
-UPDATE lfc2 SET location = TRIM(location);
-UPDATE lfc2 SET industry = TRIM(industry);
-UPDATE lfc2 SET country = TRIM(country);
-
--- Setting empty industry values to NULL for consistency
-UPDATE lfc2 SET industry = NULL WHERE industry = "";
-
--- Filling missing industry values based on the same company
-UPDATE lfc2 t1
-JOIN lfc2 t2 ON t1.company = t2.company
+-- STEP 15: Fill missing industry values based on same company
+UPDATE layoffs_cleaned t1
+JOIN layoffs_cleaned t2 ON t1.company = t2.company
 SET t1.industry = t2.industry
 WHERE t1.industry IS NULL AND t2.industry IS NOT NULL;
 
--- Final null check on industry column
-SELECT * FROM lfc2 WHERE industry IS NULL OR industry = '';
+-- STEP 16: Final null check
+SELECT * FROM layoffs_cleaned WHERE industry IS NULL OR TRIM(industry) = '';
 
--- Final cleaned dataset
-SELECT * FROM lfc2;
-
-
+-- STEP 17: View the final cleaned data
+SELECT * FROM layoffs_cleaned;
