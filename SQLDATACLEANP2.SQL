@@ -82,5 +82,4 @@ SELECT * FROM lfc2 WHERE industry IS NULL OR industry = '';
 -- Final cleaned dataset
 SELECT * FROM lfc2;
 
--- Optional: Remove the extra clean date column if it still exists
-ALTER TABLE lfc2 DROP COLUMN CLEAN_DATE;
+
